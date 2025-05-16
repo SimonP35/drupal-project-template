@@ -1,0 +1,51 @@
+version: "3"
+
+services:
+  theme:
+    container_name: ${COMPOSE_PROJECT_NAME}_theme
+    image: node:${NODE_VERSION}-alpine
+    user: node
+    working_dir: /theme
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+    volumes:
+      - ./web/themes/custom/default:/theme
+    networks:
+      - front
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "${FRONT_NETWORK}"
+      traefik.http.routers.vite.rule: "Host(`theme-$APP_DOMAIN`)"
+      traefik.http.routers.vite.service: "vite"
+      traefik.http.routers.vite.tls: "true"
+      traefik.http.services.vite.loadbalancer.server.port: "5173"
+
+  browsersync:
+    container_name: ${COMPOSE_PROJECT_NAME}_browsersync
+    build:
+      context: ./docker/browsersync
+      args:
+        - NODE_VERSION=${NODE_VERSION}
+    env_file: .env
+    working_dir: /app
+    volumes:
+      - ./web/themes/custom/default/browsersync/config.js:/app/config.js
+    networks:
+      - front
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "${FRONT_NETWORK}"
+      traefik.http.routers.browsersync-route.rule: "Host(`browsersync-$APP_DOMAIN`)"
+      traefik.http.routers.browsersync-route.service: "browsersync"
+      traefik.http.services.browsersync.loadbalancer.server.port: "80"
+      traefik.http.routers.browsersync-ui.rule: "Host(`browsersync-ui-$APP_DOMAIN`)"
+      traefik.http.routers.browsersync-ui.service: "browsersync-ui"
+      traefik.http.services.browsersync-ui.loadbalancer.server.port: "3000"
+
+  security:
+    container_name: ${COMPOSE_PROJECT_NAME}_security
+    image: aquasec/trivy:latest
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - ${HOME}/.trivy/.cache:/root/.cache/

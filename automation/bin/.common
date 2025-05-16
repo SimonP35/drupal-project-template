@@ -1,0 +1,21 @@
+#!/bin/bash
+
+trap "exit 1" TERM
+export TOP_PID=$$
+
+DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+PROJECT_DIR=${DIR}/../..
+
+APP_DIR=${PROJECT_DIR}/web
+DRUSH=${PROJECT_DIR}/vendor/bin/drush
+PHPCS=phpcs
+
+function error {
+    echo -e "\033[31m$1\033[00m"
+    kill -s TERM $TOP_PID
+    exit 1
+}
+
+function echo_info {
+    echo -e "\n\033[1;34m$1\033[00m"
+}

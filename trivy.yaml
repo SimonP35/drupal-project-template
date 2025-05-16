@@ -1,0 +1,4 @@
+scan:
+  skip-files:
+    # Ignore the composer.lock file in the fake site directory.
+    - "web/core/modules/package_manager/tests/fixtures/fake_site/composer.lock"
