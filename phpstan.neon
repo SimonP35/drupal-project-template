@@ -1,0 +1,11 @@
+parameters:
+    paths:
+        - web/modules/custom
+        - web/themes/custom
+        - web/profiles/custom
+    excludePaths:
+        - *Test.php
+        - *TestBase.php
+        - '**/vendor/**'
+        - '**/node_modules/**'
+    level: 7

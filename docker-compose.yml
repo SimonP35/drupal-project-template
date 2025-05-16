@@ -1,103 +1,148 @@
-version: '3.8'
+networks:
+  back:
+    driver: bridge
+  front:
+    external: true
+    name: ${FRONT_NETWORK}
 
 services:
-  traefik:
-    image: traefik:v2.11
-    container_name: traefik_bank_account
-    command:
-      - "--api.insecure=true" # Pour accéder au dashboard Traefik
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false" # Important pour ne pas exposer tous les conteneurs par défaut
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443" # On prépare pour le HTTPS plus tard
-      # Activation du dashboard (optionnel, mais pratique)
-      - "--api.dashboard=true"
-    ports:
-      - "80:80" # HTTP
-      - "443:443" # HTTPS
-      - "8080:8080" # Traefik Dashboard (si --api.insecure=true est activé)
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro # Permet à Traefik de lire les événements Docker
-    networks:
-      - web
-    labels:
-      - "traefik.enable=true" # Active Traefik pour lui-même (pour le dashboard)
-      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.bank.localhost`)" # Accès au dashboard
-      - "traefik.http.routers.traefik-dashboard.service=api@internal"
-      - "traefik.http.routers.traefik-dashboard.entrypoints=web"
-
-  portainer:
-    image: portainer/portainer-ce:latest
-    container_name: portainer_bank_account
-    command: -H unix:///var/run/docker.sock
-    restart: always
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer_data:/data # Persistance des données Portainer
-    networks:
-      - web
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.portainer.rule=Host(`portainer.bank.localhost`)"
-      - "traefik.http.routers.portainer.entrypoints=web"
-      - "traefik.http.services.portainer.loadbalancer.server.port=9000"
-
-  db:
-    image: postgres:15 # Ou mysql:8.0 si tu préfères
-    container_name: db_bank_account
-    restart: always
-    environment:
-      POSTGRES_DB: ${DB_NAME:-drupal}
-      POSTGRES_USER: ${DB_USER:-drupal}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-drupal}
-    volumes:
-      - db_data:/var/lib/postgresql/data # Persistance des données PostgreSQL
-    networks:
-      - internal
-    expose:
-      - 5432
-
-  drupal:
-    image: drupal:10-php8.2-apache # Utilisation d'une image Drupal récente
-    container_name: drupal_bank_account
-    restart: always
+  apache:
+    container_name: ${COMPOSE_PROJECT_NAME}_apache
     depends_on:
-      - db
-    volumes:
-      - drupal_modules:/var/www/html/modules/custom # Pour les modules custom
-      - drupal_profiles:/var/www/html/profiles/custom # Pour les profils custom
-      - drupal_sites:/var/www/html/sites # Configuration des sites, settings.php, files
-      - drupal_themes:/var/www/html/themes/custom # Pour les thèmes custom
+      - php
     environment:
-      DRUPAL_DB_HOST: db
-      DRUPAL_DB_NAME: ${DB_NAME:-drupal}
-      DRUPAL_DB_USER: ${DB_USER:-drupal}
-      DRUPAL_DB_PASSWORD: ${DB_PASSWORD:-drupal}
-      DRUPAL_SITE_NAME: "Bank Account Analyzer"
-      # Pour le développement, désactiver le cache de Twig et activer le mode debug
-      # TWIG_CONFIG_debug: 'true'
-      # TWIG_CONFIG_cache: 'false'
-    networks:
-      - internal
-      - web
+      APACHE_BACKEND_HOST: ${COMPOSE_PROJECT_NAME}_php
+      APACHE_LOG_LEVEL: ${APACHE_LOG_LEVEL}
+      APACHE_SERVER_NAME: ${APP_DOMAIN}
+      APACHE_SERVER_ROOT: ${APACHE_SERVER_ROOT}
+      APACHE_VHOST_PRESET: ${APACHE_VHOST_PRESET}
+    image: wodby/apache:${APACHE_VERSION}
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.drupal.rule=Host(`${APP_DOMAIN:-drupal.bank.localhost}`)"
-      - "traefik.http.routers.drupal.entrypoints=web"
-      - "traefik.http.services.drupal.loadbalancer.server.port=80"
+      traefik.docker.network: "${FRONT_NETWORK}"
+      traefik.enable: "true"
+      traefik.http.routers.origin.rule: "Host(`origin.${APP_DOMAIN}`)"
+      traefik.http.routers.origin.tls: "true"
+      traefik.port: "80"
+    networks:
+      - back
+      - front
+    volumes:
+      - ./:/var/www/html:cached
 
-networks:
-  web:
-    external: false
-    name: traefik_public_network
-  internal:
-    external: false
-    name: bank_account_internal_network
+  mailhog:
+    container_name: ${COMPOSE_PROJECT_NAME}_mailhog
+    image: mailhog/mailhog:${MAILHOG_VERSION}
+    labels:
+      traefik.docker.network: "${FRONT_NETWORK}"
+      traefik.enable: "true"
+      traefik.http.routers.mailhog.rule: "Host(`mailhog.${APP_DOMAIN}`)"
+      traefik.port: "8025"
+    networks:
+      - back
+      - front
+
+  mariadb:
+    container_name: ${COMPOSE_PROJECT_NAME}_mariadb
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+    healthcheck:
+      interval: ${HEALTHCHECK_INTERVAL}
+      retries: ${HEALTHCHECK_RETRIES}
+      test: "mysql --user=root --password=${MYSQL_ROOT_PASSWORD} --execute \"SHOW DATABASES;\""
+      timeout: ${HEALTHCHECK_TIMEOUT}
+    image: wodby/mariadb:${MARIADB_VERSION}
+    networks:
+      - back
+    volumes:
+      - database:/var/lib/mysql:delegated
+
+  php:
+    container_name: ${COMPOSE_PROJECT_NAME}_php
+    depends_on:
+      - mariadb
+      - redis
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      APP_HASH_SALT: ${APP_HASH_SALT}
+      APP_MODE: ${APP_MODE}
+      COMPOSER_HOME: /tmp
+      DB_HOST: ${MYSQL_HOST}
+      DB_NAME: ${MYSQL_DATABASE}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_USER: ${MYSQL_USER}
+      HOME: /tmp
+      PHP_BLACKFIRE: ${PHP_BLACKFIRE}
+      PHP_COMPOSER_VERSION: ${PHP_COMPOSER_VERSION}
+      PHP_FPM_CLEAR_ENV: ${PHP_FPM_CLEAR_ENV}
+      PHP_IDE_CONFIG: serverName=${APP_DOMAIN}
+      PHP_MAX_EXECUTION_TIME: ${PHP_MAX_EXECUTION_TIME}
+      PHP_SENDMAIL_PATH: /usr/sbin/sendmail -t -i -S mailhog:1025
+      PHP_XDEBUG_DEFAULT_ENABLE: ${PHP_XDEBUG_DEFAULT_ENABLE}
+      PHP_XDEBUG_PROFILER_OUTPUT_DIR: ${PHP_XDEBUG_PROFILER_OUTPUT_DIR}
+      PHP_XDEBUG_REMOTE_CONNECT_BACK: ${PHP_XDEBUG_REMOTE_CONNECT_BACK}
+      PHP_XDEBUG_REMOTE_HOST: ${PHP_XDEBUG_REMOTE_HOST}
+      PHP_XDEBUG_TRACE_OUTPUT_DIR: ${PHP_XDEBUG_TRACE_OUTPUT_DIR}
+      REDIS_HOST: ${REDIS_HOST}
+    image: wodby/drupal-php:${PHP_VERSION}
+    networks:
+      - back
+    volumes:
+      - ./:/var/www/html:cached
+      - tmp:/tmp:delegated
+
+  pma:
+    container_name: ${COMPOSE_PROJECT_NAME}_pma
+    environment:
+      PHP_MAX_INPUT_VARS: ${PHP_MAX_INPUT_VARS}
+      PHP_UPLOAD_MAX_FILESIZE: ${PHP_UPLOAD_MAX_FILESIZE}
+      PMA_HOST: ${COMPOSE_PROJECT_NAME}_mariadb
+      PMA_PASSWORD: ${MYSQL_PASSWORD}
+      PMA_USER: ${MYSQL_USER}
+    image: phpmyadmin/phpmyadmin:${PHPMYADMIN_VERSION}
+    labels:
+      traefik.docker.network: "${FRONT_NETWORK}"
+      traefik.enable: "true"
+      traefik.http.routers.pma.rule: "Host(`pma.${APP_DOMAIN}`)"
+      traefik.port: "80"
+    networks:
+      - back
+      - front
+
+  redis:
+    container_name: ${COMPOSE_PROJECT_NAME}_redis
+    healthcheck:
+      interval: ${HEALTHCHECK_INTERVAL}
+      retries: ${HEALTHCHECK_RETRIES}
+      test: ["CMD", "redis-cli","ping"]
+      timeout: ${HEALTHCHECK_TIMEOUT}
+    image: wodby/redis:${REDIS_VERSION}
+    networks:
+      - back
+
+  varnish:
+    container_name: ${COMPOSE_PROJECT_NAME}_varnish
+    depends_on:
+      - apache
+    environment:
+      VARNISH_BACKEND_HOST: ${COMPOSE_PROJECT_NAME}_apache
+      VARNISH_BACKEND_PORT: ${VARNISH_BACKEND_PORT}
+      VARNISH_CONFIG_PRESET: ${VARNISH_CONFIG_PRESET}
+      VARNISH_SECRET: ${VARNISH_SECRET}
+    image: wodby/varnish:${VARNISH_VERSION}
+    labels:
+      traefik.docker.network: "${FRONT_NETWORK}"
+      traefik.enable: "true"
+      traefik.http.routers.varnish.rule: "Host(`${APP_DOMAIN}`)"
+      traefik.http.routers.varnish.tls: "true"
+      traefik.port: "6081"
+    networks:
+      front:
+        aliases:
+          - "${APP_DOMAIN}"
 
 volumes:
-  db_data:
-  portainer_data:
-  drupal_modules:
-  drupal_profiles:
-  drupal_sites:
-  drupal_themes:
+  database:
+  tmp:

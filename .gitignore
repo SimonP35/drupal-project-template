@@ -1,10 +1,3 @@
-# gitignore template for Drupal 8 projects
-#
-# earlier versions of Drupal are tracked in `community/PHP/`
-#
-# follows official upstream conventions:
-# https://www.drupal.org/docs/develop/using-composer
-
 # Ignore configuration files that may contain sensitive information
 /web/sites/*/*settings*.php
 /web/sites/*/*services*.yml
@@ -61,5 +54,8 @@
 /drupal.phar
 /drupal
 
-# Ignore base project files
-/datas
+# Ignore temporarly base project files, development purpose only.
+datas
+
+# Ignore .env file
+.env
