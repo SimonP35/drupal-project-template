@@ -159,6 +159,28 @@ phpcpd: ## Run PHP Copy Paste Detector
 security_check: ## Run vulnerability check
 	$(EXEC_SECURITY) --exit-code 1 fs --security-checks vuln /app
 
+## SonarQube analysis
+
+sonar-scanner: ## Install SonarScanner if not present
+	@if [ ! -d "./sonar-scanner" ]; then \
+		mkdir -p sonar-scanner && \
+		wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.8.0.2856-linux.zip && \
+		unzip -q sonar-scanner-cli-4.8.0.2856-linux.zip -d sonar-scanner && \
+		mv sonar-scanner/sonar-scanner-4.8.0.2856-linux/* sonar-scanner/ && \
+		rm -rf sonar-scanner/sonar-scanner-4.8.0.2856-linux && \
+		rm sonar-scanner-cli-4.8.0.2856-linux.zip; \
+	fi
+
+sonar-analyze: sonar-scanner ## Run SonarQube analysis
+	./sonar-scanner/bin/sonar-scanner -Dsonar.host.url=http://localhost:9000 -Dsonar.login=admin -Dsonar.password=admin
+
+sonar-analyze-with-coverage: ## Run SonarQube analysis with code coverage
+	$(EXEC_PHP) vendor/bin/phpunit --coverage-clover=web/sites/simpletest/coverage/clover.xml
+	$(MAKE) sonar-analyze
+
+sonar-open: ## Open SonarQube in browser
+	xdg-open http://sonarqube.$(shell grep APP_DOMAIN .env | cut -d '=' -f2) || open http://sonarqube.$(shell grep APP_DOMAIN .env | cut -d '=' -f2)
+
 # Help
 
 help: ## Display help information

@@ -18,11 +18,11 @@ services:
       APACHE_VHOST_PRESET: ${APACHE_VHOST_PRESET}
     image: wodby/apache:${APACHE_VERSION}
     labels:
-      traefik.docker.network: "${FRONT_NETWORK}"
-      traefik.enable: "true"
-      traefik.http.routers.origin.rule: "Host(`origin.${APP_DOMAIN}`)"
-      traefik.http.routers.origin.tls: "true"
-      traefik.port: "80"
+      - "traefik.enable=true"
+      - "traefik.http.routers.origin.rule=Host(`origin.${APP_DOMAIN}`)"
+      - "traefik.http.routers.origin.entrypoints=websecure"
+      - "traefik.http.routers.origin.tls=true"
+      - "traefik.http.services.origin.loadbalancer.server.port=80"
     networks:
       - back
       - front
@@ -33,10 +33,11 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME}_mailhog
     image: mailhog/mailhog:${MAILHOG_VERSION}
     labels:
-      traefik.docker.network: "${FRONT_NETWORK}"
-      traefik.enable: "true"
-      traefik.http.routers.mailhog.rule: "Host(`mailhog.${APP_DOMAIN}`)"
-      traefik.port: "8025"
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailhog.rule=Host(`mailhog.${APP_DOMAIN}`)"
+      - "traefik.http.routers.mailhog.entrypoints=websecure"
+      - "traefik.http.routers.mailhog.tls=true"
+      - "traefik.http.services.mailhog.loadbalancer.server.port=8025"
     networks:
       - back
       - front
@@ -103,10 +104,11 @@ services:
       PMA_USER: ${MYSQL_USER}
     image: phpmyadmin/phpmyadmin:${PHPMYADMIN_VERSION}
     labels:
-      traefik.docker.network: "${FRONT_NETWORK}"
-      traefik.enable: "true"
-      traefik.http.routers.pma.rule: "Host(`pma.${APP_DOMAIN}`)"
-      traefik.port: "80"
+      - "traefik.enable=true"
+      - "traefik.http.routers.pma.rule=Host(`pma.${APP_DOMAIN}`)"
+      - "traefik.http.routers.pma.entrypoints=websecure"
+      - "traefik.http.routers.pma.tls=true"
+      - "traefik.http.services.pma.loadbalancer.server.port=80"
     networks:
       - back
       - front
@@ -133,16 +135,63 @@ services:
       VARNISH_SECRET: ${VARNISH_SECRET}
     image: wodby/varnish:${VARNISH_VERSION}
     labels:
-      traefik.docker.network: "${FRONT_NETWORK}"
-      traefik.enable: "true"
-      traefik.http.routers.varnish.rule: "Host(`${APP_DOMAIN}`)"
-      traefik.http.routers.varnish.tls: "true"
-      traefik.port: "6081"
+      - "traefik.enable=true"
+      - "traefik.http.routers.varnish.rule=Host(`${APP_DOMAIN}`)"
+      - "traefik.http.routers.varnish.entrypoints=websecure"
+      - "traefik.http.routers.varnish.tls=true"
+      - "traefik.http.services.varnish.loadbalancer.server.port=6081"
     networks:
-      front:
-        aliases:
-          - "${APP_DOMAIN}"
+      - back
+      - front
+
+  sonarqube:
+    container_name: ${COMPOSE_PROJECT_NAME}_sonarqube
+    image: sonarqube:9.9-community
+    depends_on:
+      - postgres
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://postgres:5432/sonar
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: sonar
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: 'true'
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_logs:/opt/sonarqube/logs
+      - sonarqube_extensions:/opt/sonarqube/extensions
+    ports:
+      - "9000:9000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.sonarqube.rule=Host(`sonarqube.${APP_DOMAIN}`)"
+      - "traefik.http.routers.sonarqube.entrypoints=websecure"
+      - "traefik.http.routers.sonarqube.tls=true"
+      - "traefik.http.services.sonarqube.loadbalancer.server.port=9000"
+    networks:
+      - back
+      - front
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  postgres:
+    container_name: ${COMPOSE_PROJECT_NAME}_postgres
+    image: postgres:13
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: sonar
+      POSTGRES_DB: sonar
+    volumes:
+      - postgresql:/var/lib/postgresql
+      - postgresql_data:/var/lib/postgresql/data
+    networks:
+      - back
 
 volumes:
   database:
   tmp:
+  sonarqube_data:
+  sonarqube_logs:
+  sonarqube_extensions:
+  postgresql:
+  postgresql_data:
