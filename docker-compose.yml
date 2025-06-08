@@ -1,0 +1,197 @@
+networks:
+  back:
+    driver: bridge
+  front:
+    external: true
+    name: ${FRONT_NETWORK}
+
+services:
+  apache:
+    container_name: ${COMPOSE_PROJECT_NAME}_apache
+    depends_on:
+      - php
+    environment:
+      APACHE_BACKEND_HOST: ${COMPOSE_PROJECT_NAME}_php
+      APACHE_LOG_LEVEL: ${APACHE_LOG_LEVEL}
+      APACHE_SERVER_NAME: ${APP_DOMAIN}
+      APACHE_SERVER_ROOT: ${APACHE_SERVER_ROOT}
+      APACHE_VHOST_PRESET: ${APACHE_VHOST_PRESET}
+    image: wodby/apache:${APACHE_VERSION}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.origin.rule=Host(`origin.${APP_DOMAIN}`)"
+      - "traefik.http.routers.origin.entrypoints=websecure"
+      - "traefik.http.routers.origin.tls=true"
+      - "traefik.http.services.origin.loadbalancer.server.port=80"
+    networks:
+      - back
+      - front
+    volumes:
+      - ./:/var/www/html:cached
+
+  mailhog:
+    container_name: ${COMPOSE_PROJECT_NAME}_mailhog
+    image: mailhog/mailhog:${MAILHOG_VERSION}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailhog.rule=Host(`mailhog.${APP_DOMAIN}`)"
+      - "traefik.http.routers.mailhog.entrypoints=websecure"
+      - "traefik.http.routers.mailhog.tls=true"
+      - "traefik.http.services.mailhog.loadbalancer.server.port=8025"
+    networks:
+      - back
+      - front
+
+  mariadb:
+    container_name: ${COMPOSE_PROJECT_NAME}_mariadb
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+    healthcheck:
+      interval: ${HEALTHCHECK_INTERVAL}
+      retries: ${HEALTHCHECK_RETRIES}
+      test: "mysql --user=root --password=${MYSQL_ROOT_PASSWORD} --execute \"SHOW DATABASES;\""
+      timeout: ${HEALTHCHECK_TIMEOUT}
+    image: wodby/mariadb:${MARIADB_VERSION}
+    networks:
+      - back
+    volumes:
+      - database:/var/lib/mysql:delegated
+
+  php:
+    container_name: ${COMPOSE_PROJECT_NAME}_php
+    depends_on:
+      - mariadb
+      - redis
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      APP_HASH_SALT: ${APP_HASH_SALT}
+      APP_MODE: ${APP_MODE}
+      COMPOSER_HOME: /tmp
+      DB_HOST: ${MYSQL_HOST}
+      DB_NAME: ${MYSQL_DATABASE}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_USER: ${MYSQL_USER}
+      HOME: /tmp
+      PHP_BLACKFIRE: ${PHP_BLACKFIRE}
+      PHP_COMPOSER_VERSION: ${PHP_COMPOSER_VERSION}
+      PHP_FPM_CLEAR_ENV: ${PHP_FPM_CLEAR_ENV}
+      PHP_IDE_CONFIG: serverName=${APP_DOMAIN}
+      PHP_MAX_EXECUTION_TIME: ${PHP_MAX_EXECUTION_TIME}
+      PHP_SENDMAIL_PATH: /usr/sbin/sendmail -t -i -S mailhog:1025
+      PHP_XDEBUG_DEFAULT_ENABLE: ${PHP_XDEBUG_DEFAULT_ENABLE}
+      PHP_XDEBUG_PROFILER_OUTPUT_DIR: ${PHP_XDEBUG_PROFILER_OUTPUT_DIR}
+      PHP_XDEBUG_REMOTE_CONNECT_BACK: ${PHP_XDEBUG_REMOTE_CONNECT_BACK}
+      PHP_XDEBUG_REMOTE_HOST: ${PHP_XDEBUG_REMOTE_HOST}
+      PHP_XDEBUG_TRACE_OUTPUT_DIR: ${PHP_XDEBUG_TRACE_OUTPUT_DIR}
+      REDIS_HOST: ${REDIS_HOST}
+    image: wodby/drupal-php:${PHP_VERSION}
+    networks:
+      - back
+    volumes:
+      - ./:/var/www/html:cached
+      - tmp:/tmp:delegated
+
+  pma:
+    container_name: ${COMPOSE_PROJECT_NAME}_pma
+    environment:
+      PHP_MAX_INPUT_VARS: ${PHP_MAX_INPUT_VARS}
+      PHP_UPLOAD_MAX_FILESIZE: ${PHP_UPLOAD_MAX_FILESIZE}
+      PMA_HOST: ${COMPOSE_PROJECT_NAME}_mariadb
+      PMA_PASSWORD: ${MYSQL_PASSWORD}
+      PMA_USER: ${MYSQL_USER}
+    image: phpmyadmin/phpmyadmin:${PHPMYADMIN_VERSION}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pma.rule=Host(`pma.${APP_DOMAIN}`)"
+      - "traefik.http.routers.pma.entrypoints=websecure"
+      - "traefik.http.routers.pma.tls=true"
+      - "traefik.http.services.pma.loadbalancer.server.port=80"
+    networks:
+      - back
+      - front
+
+  redis:
+    container_name: ${COMPOSE_PROJECT_NAME}_redis
+    healthcheck:
+      interval: ${HEALTHCHECK_INTERVAL}
+      retries: ${HEALTHCHECK_RETRIES}
+      test: ["CMD", "redis-cli","ping"]
+      timeout: ${HEALTHCHECK_TIMEOUT}
+    image: wodby/redis:${REDIS_VERSION}
+    networks:
+      - back
+
+  varnish:
+    container_name: ${COMPOSE_PROJECT_NAME}_varnish
+    depends_on:
+      - apache
+    environment:
+      VARNISH_BACKEND_HOST: ${COMPOSE_PROJECT_NAME}_apache
+      VARNISH_BACKEND_PORT: ${VARNISH_BACKEND_PORT}
+      VARNISH_CONFIG_PRESET: ${VARNISH_CONFIG_PRESET}
+      VARNISH_SECRET: ${VARNISH_SECRET}
+    image: wodby/varnish:${VARNISH_VERSION}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.varnish.rule=Host(`${APP_DOMAIN}`)"
+      - "traefik.http.routers.varnish.entrypoints=websecure"
+      - "traefik.http.routers.varnish.tls=true"
+      - "traefik.http.services.varnish.loadbalancer.server.port=6081"
+    networks:
+      - back
+      - front
+
+  sonarqube:
+    container_name: ${COMPOSE_PROJECT_NAME}_sonarqube
+    image: sonarqube:9.9-community
+    depends_on:
+      - postgres
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://postgres:5432/sonar
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: sonar
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: 'true'
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_logs:/opt/sonarqube/logs
+      - sonarqube_extensions:/opt/sonarqube/extensions
+    ports:
+      - "9000:9000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.sonarqube.rule=Host(`sonarqube.${APP_DOMAIN}`)"
+      - "traefik.http.routers.sonarqube.entrypoints=websecure"
+      - "traefik.http.routers.sonarqube.tls=true"
+      - "traefik.http.services.sonarqube.loadbalancer.server.port=9000"
+    networks:
+      - back
+      - front
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  postgres:
+    container_name: ${COMPOSE_PROJECT_NAME}_postgres
+    image: postgres:13
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: sonar
+      POSTGRES_DB: sonar
+    volumes:
+      - postgresql:/var/lib/postgresql
+      - postgresql_data:/var/lib/postgresql/data
+    networks:
+      - back
+
+volumes:
+  database:
+  tmp:
+  sonarqube_data:
+  sonarqube_logs:
+  sonarqube_extensions:
+  postgresql:
+  postgresql_data:

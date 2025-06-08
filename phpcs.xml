@@ -1,0 +1,18 @@
+<ruleset name="PHP_CodeSniffer" xsi:noNamespaceSchemaLocation="phpcs.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+    <file>web/modules/custom</file>
+    <file>web/themes/custom</file>
+    <file>web/profiles/custom</file>
+
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+    <exclude-pattern>**/*/node_modules/*</exclude-pattern>
+
+    <arg name="basepath" value="."/>
+    <arg name="extensions" value="php,module,inc,test,profile,theme,info,txt"/>
+    <arg name="report-full"/>
+
+    <rule ref="vendor/drupal/coder/coder_sniffer/Drupal" />
+    <rule ref="vendor/drupal/coder/coder_sniffer/DrupalPractice" />
+
+
+</ruleset>
